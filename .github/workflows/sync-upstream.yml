@@ -43,10 +43,10 @@ jobs:
       - name: Push changes
         run: git push origin master
 
-      - name: Wait 10 minutes for Render deployment
+      - name: Wait 20 minutes for Render deployment
         run: |
-          echo "Waiting 10 minutes for Render to deploy..."
-          sleep 600
+          echo "Waiting 20 minutes for Render to deploy..."
+          sleep 1200
 
       - name: Health check
         id: healthcheck
