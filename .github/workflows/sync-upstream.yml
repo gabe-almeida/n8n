@@ -1,0 +1,72 @@
+name: Sync with Upstream
+
+on:
+  schedule:
+    # Every Sunday at 3am EST (8am UTC)
+    - cron: '0 8 * * 0'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Save current commit SHA (for rollback)
+        id: save-sha
+        run: |
+          echo "PREVIOUS_SHA=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "Saved current SHA: $(git rev-parse HEAD)"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/n8n-io/n8n.git
+
+      - name: Fetch upstream
+        run: git fetch upstream
+
+      - name: Merge upstream/master into master
+        id: merge
+        run: |
+          git checkout master
+          git merge upstream/master --no-edit
+          echo "MERGE_SUCCESS=true" >> $GITHUB_OUTPUT
+
+      - name: Push changes
+        run: git push origin master
+
+      - name: Wait 10 minutes for Render deployment
+        run: |
+          echo "Waiting 10 minutes for Render to deploy..."
+          sleep 600
+
+      - name: Health check
+        id: healthcheck
+        run: |
+          echo "Checking n8n health endpoint..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://n8n-rel8.onrender.com/healthz --max-time 30)
+          echo "Health check returned: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "HEALTHY=true" >> $GITHUB_OUTPUT
+            echo "✅ Deployment successful!"
+          else
+            echo "HEALTHY=false" >> $GITHUB_OUTPUT
+            echo "❌ Health check failed with status: $HTTP_STATUS"
+          fi
+
+      - name: Rollback if unhealthy
+        if: steps.healthcheck.outputs.HEALTHY == 'false'
+        run: |
+          echo "🔄 Rolling back to previous commit: ${{ steps.save-sha.outputs.PREVIOUS_SHA }}"
+          git reset --hard ${{ steps.save-sha.outputs.PREVIOUS_SHA }}
+          git push origin master --force
+          echo "✅ Rollback complete. Render will redeploy the previous version."
+          exit 1
